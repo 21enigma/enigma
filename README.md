@@ -38,4 +38,4 @@ Django utilizes the shell for managing your site. For this click on the `?` in t
 By default this template utilizes the sqlite database engine. While this is fine for development it won't work with external users of your app as we don't persist changes to files when they happen outside the development environment. 
 
 
-
+adding testing code here
