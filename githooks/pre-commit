@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+namedtuple_invalid_files=()
+for filename in `git status --porcelain | sed s/^...//`; do
+    if [[ $filename == *"pre-commit"* || $filename == *"tests"* ]]; then
+      continue
+    fi
+    # Filter all the namedtuple from the current file, and converting to list.
+    namedtuples=`awk '/namedtuple\(/, /\)$/ {print $0}' $filename`
+    IFS=')' namedtuple_list=($namedtuples)
+    for item in "${namedtuple_list[@]}"; do
+      # Removing new line & extra spaces
+      item=$(echo "$item" | tr -d '\n\r\t ' | tr "'" '"')
+
+      # Extracting namedtuple object name & type name
+      # Sample $item will be `PitchedPlanCleanedData=namedtuple("PitchedPlanData",["plan","expert_bio"])`
+      # here `\1, \2` is just to format the matched data like below.
+      # this will return like: `PitchedPlanCleanedData, PitchedPlanData`
+      namedtuple_attributes=$(echo $item | sed -n 's/\([^[\w+]*\)=.*namedtuple("\([^\w+,"]*\)",.*/\1, \2/p')
+
+      # splitting comma-separated string to two different variables
+      IFS=', ' read -r object_name type_name <<< "$namedtuple_attributes"
+      if [[ $object_name != $type_name ]]; then
+        namedtuple_invalid_files+=($(echo "$filename" "==>" "$object_name"))
+      fi
+    done
+done
+if [ ${#namedtuple_invalid_files[@]} != 0 ]; then
+  echo -e "\033[31;1m****************************************************************************\033[0m"
+  echo -e "\033[31;1m***********   namedtuple object name & typename are not same  **************\033[0m"
+  echo -e "\033[31;1m****************************************************************************\033[0m"
+  echo -e "\033[30;1m Following files need to be rectified \033[0m "
+  printf '%s\n' "${namedtuple_invalid_files[@]}"
+  exit 1
+fi
+
+log_event_param_missing=()
+for filename in `git status --porcelain | sed s/^...//`; do
+    if [[ $filename == *"pre-commit"* || $filename == *"eventlog"* || $filename == *"tests"* ]]; then
+      continue
+    fi
+    log_event_count=`grep $filename -e "log_event(" | wc -l`
+    active_until_ddmmyyyy_count=`grep $filename -e "active_until_ddmmyyyy" | wc -l`
+    always_active_count=`grep $filename -e "always_active" | wc -l`
+    param_count=$((active_until_ddmmyyyy_count + always_active_count))
+    if [[ $log_event_count > 0 && $log_event_count != $param_count ]]
+    then
+      log_event_param_missing+=($filename)
+    fi
+done
+if [ ${#log_event_param_missing[@]} != 0 ]
+then
+  echo -e "\033[31;1m****************************************************************************\033[0m"
+  echo -e "\033[31;1m******   Either remove log_event or add active_until_ddmmyyyy date  ********\033[0m"
+  echo -e "\033[31;1m****************************************************************************\033[0m"
+  echo -e "\033[30;1m Following files need to be rectified \033[0m "
+  printf '%s\n' "${log_event_param_missing[@]}"
+  exit 1
+fi
+
+
+#Below code is run via python, anyone
+python - << EOF
+import sys
+
+from flake8.main import git
+
+if __name__ == '__main__':
+    sys.exit(
+        git.hook(strict=git.config_for('strict'), lazy=git.config_for('lazy'))
+    )
+EOF

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+# Called by "git push" after it has checked the remote status, but before anything has been
+# pushed. If this script exits with a non-zero status nothing will be pushed.
+#
+# We are making the following checks before push.
+# 1. Checking for python 3
+# 2. Checking for missing django migration files.
+
+# Check for python 3 environment
+check_py3() {
+    echo "Checking for python 3"
+    if ! [[ $(python --version) = $'Python 3.7'* ]]
+    then
+        echo =========================================================================
+        echo 'Aborting Push. Python version has to be 3.7.X 😒'
+        echo =========================================================================
+        exit 1
+    fi
+}
+check_py3
+
+
+function join_by { local d=$1; shift; echo -n "$1"; shift; printf "%s" "${@/#/$d}"; }
+
+# Check for missing migrations.
+check_missing_migrations() {
+    cd NaviHealth
+    MIGRATION_COMMAND='python manage.py makemigrations --check --noinput --settings=healthify.settings'
+    if [ "$ENABLE_DOCKER" = "true" ]
+    then
+        docker exec -it navihealth_web_1 $MIGRATION_COMMAND
+    else
+        eval $MIGRATION_COMMAND
+    fi
+    if [ $? -ne 0 ]; then
+        echo =========================================================================
+        echo 'Aborting Push. Migrations files were missing 😑 . Commit them.'
+        echo =========================================================================
+        exit 1
+    fi
+}
+
+# Following decides, if we should check diff was `master` or remote branch.
+REMOTE_BRANCH=$(git remote)/$(git symbolic-ref --short HEAD)
+if [ -z $(git branch -a | grep "remotes/${REMOTE_BRANCH}$") ]; then
+    REMOTE_BRANCH=origin/master
+fi
+
+PATHS_TO_CHECK=("models.py" "constants.py")
+echo "Checking for migration files in ${PATHS_TO_CHECK[@]}"
+FILES_PATTERN_TO_CHECK=$(join_by '\|' ${PATHS_TO_CHECK[@]})
+if [ $(git diff --stat --cached $REMOTE_BRANCH --name-only | grep -c $FILES_PATTERN_TO_CHECK) -ge 1 ]; then
+    echo 'Checking for missing migrations.'
+    check_missing_migrations
+    echo 'All Ok. Migrations present.  😊'
+fi
